@@ -1,0 +1,13 @@
+{
+  "name": "ustaxdeductionfinder",
+  "version": "1.0.0",
+  "private": true,
+  "description": "US Tax Deduction Finder & Calculator - static site with 20 launch articles, deployable on Vercel.",
+  "scripts": {
+    "dev": "npx serve .",
+    "start": "npx serve ."
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
