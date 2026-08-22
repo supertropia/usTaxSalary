@@ -61,13 +61,42 @@
 
   /* ---------- Text-to-Speech: "Listen to this article" ----------
      Uses the browser's built-in, free SpeechSynthesis Web API.
-     No API key or paid service required. */
+     No API key or paid service required.
+
+     Chrome-specific fixes applied here:
+     1) Chrome loads its voice list asynchronously — speak() called before
+        voices are ready can silently do nothing on the first click. We wait
+        for the "voiceschanged" event (or a short poll) before enabling.
+     2) Chrome has a long-standing bug where utterances longer than ~15
+        seconds get cut off / go silent. We avoid it by splitting the
+        article into sentence-sized chunks and queuing them as separate
+        utterances that play back-to-back, instead of one giant utterance.
+     3) We prefer a local/offline voice when available, since Chrome's
+        network-based voices can fail silently with no error event if the
+        request to Google's voice service is blocked or slow. */
   var ttsBtn = document.getElementById("tts-btn");
   var ttsLabel = document.getElementById("tts-label");
   if (ttsBtn && articleBody && "speechSynthesis" in window) {
-    var utterance = null;
+    var synth = window.speechSynthesis;
+    var chunks = [];
+    var chunkIndex = 0;
     var speaking = false;
     var paused = false;
+    var chosenVoice = null;
+    var voicesReady = false;
+
+    function pickVoice() {
+      var voices = synth.getVoices() || [];
+      if (!voices.length) return;
+      voicesReady = true;
+      var enVoices = voices.filter(function (v) { return /^en/i.test(v.lang); });
+      var local = enVoices.filter(function (v) { return v.localService; });
+      chosenVoice = local[0] || enVoices[0] || voices[0];
+    }
+    pickVoice();
+    if (!voicesReady && "onvoiceschanged" in synth) {
+      synth.addEventListener("voiceschanged", pickVoice, { once: true });
+    }
 
     function getArticleText() {
       var clone = articleBody.cloneNode(true);
@@ -76,42 +105,94 @@
       return clone.textContent.replace(/\s+/g, " ").trim();
     }
 
+    function splitIntoChunks(text) {
+      // Split on sentence boundaries, then regroup into ~200-character
+      // chunks so Chrome never has to hold a single very long utterance.
+      var sentences = text.match(/[^.!?]+[.!?]+(\s|$)|[^.!?]+$/g) || [text];
+      var out = [];
+      var buf = "";
+      sentences.forEach(function (s) {
+        if ((buf + s).length > 200 && buf) {
+          out.push(buf.trim());
+          buf = s;
+        } else {
+          buf += s;
+        }
+      });
+      if (buf.trim()) out.push(buf.trim());
+      return out;
+    }
+
     function stopSpeech() {
-      window.speechSynthesis.cancel();
+      synth.cancel();
       speaking = false;
       paused = false;
+      chunkIndex = 0;
       ttsBtn.classList.remove("playing");
       ttsLabel.textContent = "Listen to this article";
     }
 
+    function speakNextChunk() {
+      if (chunkIndex >= chunks.length) {
+        stopSpeech();
+        return;
+      }
+      var utterance = new SpeechSynthesisUtterance(chunks[chunkIndex]);
+      utterance.rate = 0.98;
+      utterance.pitch = 1;
+      utterance.lang = "en-US";
+      if (chosenVoice) utterance.voice = chosenVoice;
+      utterance.onend = function () {
+        chunkIndex++;
+        speakNextChunk();
+      };
+      utterance.onerror = function () {
+        // Skip a chunk that failed rather than killing the whole reading.
+        chunkIndex++;
+        if (chunkIndex < chunks.length) {
+          speakNextChunk();
+        } else {
+          stopSpeech();
+        }
+      };
+      synth.speak(utterance);
+    }
+
     ttsBtn.addEventListener("click", function () {
       if (!speaking) {
+        if (!voicesReady) pickVoice(); // last-chance sync attempt
         var text = getArticleText();
-        utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 0.98;
-        utterance.pitch = 1;
-        utterance.lang = "en-US";
-        utterance.onend = stopSpeech;
-        utterance.onerror = stopSpeech;
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(utterance);
+        chunks = splitIntoChunks(text);
+        chunkIndex = 0;
+        synth.cancel();
         speaking = true;
+        paused = false;
         ttsBtn.classList.add("playing");
         ttsLabel.textContent = "Pause listening";
+        speakNextChunk();
       } else if (!paused) {
-        window.speechSynthesis.pause();
+        synth.pause();
         paused = true;
         ttsLabel.textContent = "Resume listening";
       } else {
-        window.speechSynthesis.resume();
+        synth.resume();
         paused = false;
         ttsLabel.textContent = "Pause listening";
       }
     });
 
     window.addEventListener("beforeunload", function () {
-      window.speechSynthesis.cancel();
+      synth.cancel();
     });
+
+    // Chrome occasionally goes idle and silently drops an in-progress
+    // utterance queue. A harmless pause/resume "heartbeat" keeps it alive.
+    setInterval(function () {
+      if (speaking && !paused && synth.speaking) {
+        synth.pause();
+        synth.resume();
+      }
+    }, 10000);
   } else if (ttsBtn) {
     ttsBtn.style.display = "none";
   }

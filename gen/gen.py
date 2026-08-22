@@ -9,7 +9,7 @@ from datetime import datetime
 from articles_data import ARTICLES, TAGS
 
 SITE_NAME = "USTaxDeductionFinder.com"
-SITE_URL = "https://ustaxdeductionfinder.com"
+SITE_URL = "https://www.ustaxdeductionfinder.com"
 OUT = os.path.join(os.path.dirname(__file__), "..")
 BLOG_DIR = os.path.join(OUT, "blog")
 LEGAL_DIR = os.path.join(OUT, "legal")

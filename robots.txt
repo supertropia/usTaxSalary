@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://ustaxdeductionfinder.com/sitemap.xml
+Sitemap: https://www.ustaxdeductionfinder.com/sitemap.xml
